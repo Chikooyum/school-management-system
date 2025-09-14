@@ -75,8 +75,8 @@
         <td colspan="2"><strong>Diterima dari:</strong> {{ $firstPayment->studentBill->student->name }}</td>
     </tr>
      <tr>
-        <td colspan="2"><strong>Diproses oleh:</strong> {{ $firstPayment->user->name }}</td>
-    </tr>
+    <td colspan="2"><strong>Diproses oleh:</strong> {{ $firstPayment->processor->name }}</td>
+</tr>
 </table>
 
             <table class="payment-info">

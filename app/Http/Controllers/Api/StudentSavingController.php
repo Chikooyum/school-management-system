@@ -56,69 +56,78 @@ class StudentSavingController extends Controller
             }
         }
 
-        $transaction = $student->savings()->create([
-    'transaction_date' => now(),
-    'type' => $data['type'],
-    'amount' => $data['amount'],
-    'description' => $data['description'],
-    'user_id' => auth()->id(), // <-- Tambahkan baris ini
-]);
+        $actor = auth()->user();
+    $student->load('classGroup.waliKelas.user'); // Muat relasi yang dibutuhkan
+    $waliKelasUser = $student->classGroup?->waliKelas?->user;
+    $handoverUserId = ($actor->role === 'sysadmin' && $waliKelasUser) ? $waliKelasUser->id : $actor->id;
 
+    $transaction = $student->savings()->create([
+        'transaction_date' => now(),
+        'type' => $data['type'],
+        'amount' => $data['amount'],
+        'description' => $data['description'],
+        'processed_by_user_id' => $actor->id,
+        'handover_user_id' => $handoverUserId,
+    ]);
         return response()->json($transaction, 201);
     }
-    public function withdrawAndPay(Request $request, Student $student)
-    {
-        $data = $request->validate([
-            'student_bill_id' => 'required|exists:student_bills,id',
-            'receipt_number' => 'required|string|unique:payments,receipt_number',
+    // app/Http/Controllers/Api/StudentSavingController.php
+
+public function withdrawAndPay(Request $request, Student $student)
+{
+    $data = $request->validate([
+        'student_bill_id' => 'required|exists:student_bills,id',
+        'receipt_number' => 'required|string|unique:payments,receipt_number',
+    ]);
+
+    $bill = StudentBill::findOrFail($data['student_bill_id']);
+
+    if ($bill->student_id !== $student->id) {
+        abort(403, 'Tagihan tidak sesuai dengan siswa.');
+    }
+
+    $amountToPay = $bill->remaining_amount;
+
+    // Validasi saldo
+    $currentBalance = $student->savings()->where('type', 'Setoran')->sum('amount') - $student->savings()->where('type', 'Penarikan')->sum('amount');
+    if ($amountToPay > $currentBalance) {
+        return response()->json(['message' => 'Saldo tabungan tidak mencukupi untuk membayar tagihan ini.'], 422);
+    }
+
+    DB::transaction(function () use ($student, $bill, $amountToPay, $data) {
+        $actor = auth()->user();
+
+        // 1. Catat sebagai penarikan dari tabungan (dengan kolom yang benar)
+        $student->savings()->create([
+            'transaction_date' => now(),
+            'type' => 'Penarikan',
+            'amount' => $amountToPay,
+            'description' => 'Pembayaran tagihan: ' . $bill->costItem->name,
+            'processed_by_user_id' => $actor->id,
+            'handover_user_id' => $actor->id, // Transaksi internal, tanggung jawabnya sama dengan pemroses
+            'reconciled_at' => now(),
         ]);
 
-        $bill = StudentBill::findOrFail($data['student_bill_id']);
+        // 2. Catat sebagai pembayaran tagihan (dengan kolom yang benar)
+        Payment::create([
+            'student_bill_id' => $bill->id,
+            'payment_date' => now(),
+            'amount_paid' => $amountToPay,
+            'payment_method' => 'Tabungan',
+            'receipt_number' => $data['receipt_number'],
+            'processed_by_user_id' => $actor->id,
+            'handover_user_id' => $actor->id,
+            'reconciled_at' => now(),
+        ]);
 
-        // Otorisasi: Pastikan tagihan ini milik siswa yang benar
-        if ($bill->student_id !== $student->id) {
-            abort(403, 'Tagihan tidak sesuai dengan siswa.');
-        }
+        // 3. Update status tagihan
+        $bill->update([
+            'remaining_amount' => 0,
+            'status' => 'Lunas',
+        ]);
+    });
 
-        $amountToPay = $bill->remaining_amount;
-
-        // Validasi saldo
-        $currentBalance = $student->savings()->where('type', 'Setoran')->sum('amount') - $student->savings()->where('type', 'Penarikan')->sum('amount');
-        if ($amountToPay > $currentBalance) {
-            return response()->json(['message' => 'Saldo tabungan tidak mencukupi untuk membayar tagihan ini.'], 422);
-        }
-
-        // Lakukan kedua aksi dalam satu DB Transaction
-        DB::transaction(function () use ($student, $bill, $amountToPay, $data) {
-            // 1. Catat sebagai penarikan dari tabungan
-            $student->savings()->create([
-                'transaction_date' => now(),
-                'type' => 'Penarikan',
-                'amount' => $amountToPay,
-                'description' => 'Pembayaran tagihan: ' . $bill->costItem->name,
-                'user_id' => auth()->id(),
-                'reconciled_at' => now(), // Transaksi internal langsung dianggap terekonsiliasi
-            ]);
-
-            // 2. Catat sebagai pembayaran tagihan
-            Payment::create([
-                'student_bill_id' => $bill->id,
-                'payment_date' => now(),
-                'amount_paid' => $amountToPay,
-                'payment_method' => 'Tabungan', // <-- TAMBAHKAN BARIS INI
-                'receipt_number' => $data['receipt_number'],
-                'user_id' => auth()->id(),
-                'reconciled_at' => now(),
-            ]);
-
-            // 3. Update status tagihan
-            $bill->update([
-                'remaining_amount' => 0,
-                'status' => 'Lunas',
-            ]);
-        });
-
-        return response()->json(['message' => 'Tagihan berhasil dibayar menggunakan saldo tabungan.']);
-    }
+    return response()->json(['message' => 'Tagihan berhasil dibayar menggunakan saldo tabungan.']);
+}
 
 }

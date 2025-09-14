@@ -29,7 +29,7 @@ Route::post('login', [AuthController::class, 'login'])->name('login');
 // Rute untuk melihat pengumuman & unduhan sekarang publik
 Route::get('announcements', [AnnouncementController::class, 'index']);
 Route::get('downloads', [DownloadableFileController::class, 'index']);
-
+Route::get('receipts/{receipt_number}', [PaymentController::class, 'generateMultiBillReceipt']);
 
 // --- RUTE YANG DILINDUNGI OTENTIKASI ---
 Route::middleware('auth:sanctum')->group(function () {
@@ -62,7 +62,7 @@ Route::get('users/creatable-roles', [UserController::class, 'getCreatableRoles']
     Route::post('payments/bulk', [PaymentController::class, 'storeBulk']);
     Route::post('payments/multi-bill', [PaymentController::class, 'storeMultiBill']);
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'generateReceipt']);
-    Route::get('receipts/{receipt_number}', [PaymentController::class, 'generateMultiBillReceipt']);
+
     // routes/api.php
 
 
@@ -87,6 +87,8 @@ Route::get('users/creatable-roles', [UserController::class, 'getCreatableRoles']
     Route::get('reports/attendance', [ReportController::class, 'getAttendanceReport']);
     // routes/api.php
     Route::get('reports/attendance/monthly', [ReportController::class, 'getMonthlyAttendanceReport']);
+    // routes/api.php
+Route::get('reports/all-payments', [ReportController::class, 'getAllPayments']);
     // Rute untuk membuat & menghapus pengumuman/unduhan tetap dilindungi
     Route::post('announcements', [AnnouncementController::class, 'store']);
     Route::delete('announcements/{announcement}', [AnnouncementController::class, 'destroy']);

@@ -37,5 +37,17 @@ class UserSeeder extends Seeder
             'password' => Hash::make('password'),
             'role' => 'admin',
         ]);
+        // database/seeders/UserSeeder.php
+{
+    // ... (User Super Admin, Admin, Sysadmin tidak berubah) ...
+
+    // User Guru (untuk testing)
+    User::create([
+        'name' => 'Ani Suryani',
+        'email' => 'guru.ani@sekolah.guru',
+        'password' => Hash::make('password123'),
+        'role' => 'guru',
+    ]);
+}
     }
 }

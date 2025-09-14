@@ -46,6 +46,7 @@ class ReportController extends Controller
     // app/Http/Controllers/Api/ReportController.php
 public function getHandoverReport(Request $request)
     {
+
         $reportDate = $request->query('date', now()->toDateString());
 
         // --- LOGIKA BARU UNTUK LAPORAN TERTUNDA ---
@@ -53,8 +54,14 @@ public function getHandoverReport(Request $request)
         $pendingSavings = StudentSaving::with('student', 'user')->where('type', 'Setoran')->whereNull('reconciled_at')->get();
 
         $pendingReport = collect([]);
-        foreach ($pendingPayments as $p) { if($p->user) $pendingReport->push(['user_id' => $p->user_id, 'user_name' => $p->user->name, 'type' => 'Pembayaran', 'description' => $p->studentBill->costItem->name . ' - ' . $p->studentBill->student->name, 'amount' => $p->amount_paid, 'created_at' => $p->created_at, 'method' => $p->payment_method]); }
-        foreach ($pendingSavings as $s) { if($s->user) $pendingReport->push(['user_id' => $s->user_id, 'user_name' => $s->user->name, 'type' => 'Tabungan', 'description' => 'Setoran Tabungan - ' . $s->student->name, 'amount' => $s->amount, 'created_at' => $s->created_at, 'method' => 'Tunai']); }
+        foreach ($pendingPayments as $p) {
+    $handoverUser = \App\Models\User::find($p->handover_user_id);
+    if($handoverUser) $pendingReport->push(['user_id' => $handoverUser->id, 'user_name' => $handoverUser->name, 'type' => 'Pembayaran', 'description' => $p->studentBill->costItem->name . ' - ' . $p->studentBill->student->name, 'amount' => $p->amount_paid, 'created_at' => $p->created_at, 'method' => $p->payment_method]);
+}
+        foreach ($pendingSavings as $s) {
+    $handoverUser = \App\Models\User::find($s->handover_user_id);
+    if($handoverUser) $pendingReport->push(['user_id' => $handoverUser->id, 'user_name' => $handoverUser->name, 'type' => 'Tabungan', 'description' => 'Setoran Tabungan - ' . $s->student->name, 'amount' => $s->amount, 'created_at' => $s->created_at, 'method' => 'Tunai']);
+}
 
         // Kelompokkan berdasarkan tanggal, LALU berdasarkan user
         $groupedPending = $pendingReport->groupBy(function($item) {
@@ -79,10 +86,15 @@ public function getHandoverReport(Request $request)
         $reconciledSavings = StudentSaving::with('student', 'user')->where('type', 'Setoran')->whereDate('reconciled_at', $reportDate)->get();
 
         $reconciledReport = collect([]);
-        foreach ($reconciledPayments as $p) { if($p->user) $reconciledReport->push(['user_id' => $p->user_id, 'user_name' => $p->user->name, 'type' => 'Pembayaran', 'description' => $p->studentBill->costItem->name . ' - ' . $p->studentBill->student->name, 'amount' => $p->amount_paid, 'created_at' => $p->created_at, 'method' => $p->payment_method]); }
-        foreach ($reconciledSavings as $s) { if($s->user) $reconciledReport->push(['user_id' => $s->user_id, 'user_name' => $s->user->name, 'type' => 'Tabungan', 'description' => 'Setoran Tabungan - ' . $s->student->name, 'amount' => $s->amount, 'created_at' => $s->created_at, 'method' => 'Tunai']); }
+        foreach ($reconciledPayments as $p) {
+    $handoverUser = \App\Models\User::find($p->handover_user_id);
+    if($handoverUser) $reconciledReport->push(['user_id' => $handoverUser->id, 'user_name' => $handoverUser->name, 'type' => 'Pembayaran', 'description' => $p->studentBill->costItem->name . ' - ' . $p->studentBill->student->name, 'amount' => $p->amount_paid, 'created_at' => $p->created_at, 'method' => $p->payment_method]);
+}
+        foreach ($reconciledSavings as $s) {
+    $handoverUser = \App\Models\User::find($s->handover_user_id);
+    if($handoverUser) $reconciledReport->push(['user_id' => $handoverUser->id, 'user_name' => $handoverUser->name, 'type' => 'Tabungan', 'description' => 'Setoran Tabungan - ' . $s->student->name, 'amount' => $s->amount, 'created_at' => $s->created_at, 'method' => 'Tunai']);
+}
 
-        $grouper = function ($carry, $item) { /* ... (fungsi grouper ini hanya untuk reconciled) ... */ };
         $groupedReconciled = $reconciledReport->groupBy('user_name')->map(function ($items, $name) {
     // Hitung hanya uang tunai (Setoran Tabungan + Pembayaran Tunai)
     $cashTotal = $items->filter(function ($item) {
@@ -104,29 +116,30 @@ public function getHandoverReport(Request $request)
     }
 
     public function reconcileTransactions(Request $request)
-    {
-        // Sekarang butuh user_id DAN report_date
-        $validated = $request->validate([
-            'user_id' => 'required|exists:users,id',
-            'report_date' => 'required|date_format:Y-m-d',
-        ]);
+{
+    $validated = $request->validate([
+        'user_id' => 'required|exists:users,id',
+        'report_date' => 'required|date_format:Y-m-d',
+    ]);
 
-        DB::transaction(function () use ($validated) {
-            // Selesaikan hanya transaksi untuk user dan tanggal tersebut
-            Payment::where('user_id', $validated['user_id'])
-                ->whereDate('created_at', $validated['report_date'])
-                ->whereNull('reconciled_at')
-                ->update(['reconciled_at' => now()]);
+    DB::transaction(function () use ($validated) {
+        // Hapus baris $reconciledAt = ...
 
-            StudentSaving::where('user_id', $validated['user_id'])
-                ->where('type', 'Setoran')
-                ->whereDate('created_at', $validated['report_date'])
-                ->whereNull('reconciled_at')
-                ->update(['reconciled_at' => now()]);
-        });
+        // Gunakan now() langsung, yang akan mencatat tanggal & waktu saat ini
+        Payment::where('handover_user_id', $validated['user_id'])
+            ->whereDate('created_at', $validated['report_date'])
+            ->whereNull('reconciled_at')
+            ->update(['reconciled_at' => $validated['report_date']]);
 
-        return response()->json(['message' => 'Laporan berhasil direkonsiliasi.']);
-    }
+        StudentSaving::where('handover_user_id', $validated['user_id'])
+            ->where('type', 'Setoran')
+            ->whereDate('created_at', $validated['report_date'])
+            ->whereNull('reconciled_at')
+            ->update(['reconciled_at' => $validated['report_date']]);
+    });
+
+    return response()->json(['message' => 'Laporan berhasil direkonsiliasi.']);
+}
     // app/Http/Controllers/Api/ReportController.php
 public function getAttendanceReport(Request $request)
 {
@@ -212,5 +225,44 @@ public function getMonthlyAttendanceReport(Request $request)
         'daily_trend' => $dailyTrend,
         'student_details' => $studentDetails,
     ]);
+}
+
+public function getAllPayments(Request $request)
+{
+        $user = auth()->user(); // Ambil user yang sedang login
+
+    $range = $request->query('range', '1_month'); // Default 1 bulan
+
+    $query = Payment::with(['studentBill.student:id,name', 'processor:id,name'])
+                    ->orderBy('payment_date', 'desc');
+
+    if ($user->role === 'guru') {
+    $query->where('handover_user_id', $user->id);
+}
+
+    // Terapkan filter rentang waktu
+    if ($range === '1_month') {
+        $query->where('payment_date', '>=', now()->subMonth());
+    } elseif ($range === '3_months') {
+        $query->where('payment_date', '>=', now()->subMonths(3));
+    }
+    // Jika 'all', tidak ada filter waktu
+
+    $payments = $query->paginate(20);
+
+    // Ambil semua nomor kwitansi yang muncul lebih dari sekali
+    $multiBillReceiptNumbers = Payment::select('receipt_number')
+        ->whereIn('receipt_number', $payments->pluck('receipt_number'))
+        ->groupBy('receipt_number')
+        ->havingRaw('COUNT(*) > 1')
+        ->pluck('receipt_number');
+
+    // Tambahkan penanda 'is_multi_bill' pada setiap item pembayaran
+    $payments->getCollection()->transform(function ($payment) use ($multiBillReceiptNumbers) {
+        $payment->is_multi_bill = $multiBillReceiptNumbers->contains($payment->receipt_number);
+        return $payment;
+    });
+
+    return response()->json($payments);
 }
 }
