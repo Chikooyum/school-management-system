@@ -34,10 +34,31 @@
             z-index: -1; /* Letakkan di belakang konten */
         }
         /* --- AKHIR STYLE BARU --- */
+
+        .watermark-text {
+            position: absolute;
+            bottom: 20%;
+            left: 50%;
+            transform: translateX(-50%) rotate(-45deg);
+            font-size: 72px;
+            color: rgba(255, 0, 0, 0.5);
+            z-index: 10;
+            pointer-events: none;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body>
     <div class="watermark-container">
+        <!-- Debug: Remaining Amount: {{ $firstPayment->studentBill->remaining_amount ?? 'N/A' }} -->
+        @if(isset($firstPayment) && $firstPayment && isset($firstPayment->studentBill) && $firstPayment->studentBill && isset($firstPayment->studentBill->remaining_amount))
+            @if($firstPayment->studentBill->remaining_amount == 0)
+                <div class="watermark-text">LUNAS</div>
+            @elseif($firstPayment->studentBill->remaining_amount > 0)
+                <div class="watermark-text">CICILAN</div>
+            @endif
+        @endif
         <div class="container">
             <div class="header">
     <table style="width: 100%; border: none; text-align: center;">

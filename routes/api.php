@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\StaffController;
 use App\Http\Controllers\Api\TeacherPortalController; // Tambahkan di atas
 use App\Http\Controllers\Api\AttendanceController; // <-- Pastikan ini di-import
 use App\Http\Controllers\Api\HolidayController;
+use App\Http\Controllers\Api\StaffAttendanceController;
 
 
 // --- RUTE PUBLIK (TIDAK PERLU LOGIN) ---
@@ -117,5 +118,9 @@ Route::get('reports/all-payments', [ReportController::class, 'getAllPayments']);
 // Di dalam grup middleware('auth:sanctum')
     Route::apiResource('holidays', HolidayController::class)->only(['index', 'store', 'destroy']);
     Route::get('holidays/check', [HolidayController::class, 'checkDate']);
+
+    Route::get('admin/attendance/qr-token', [StaffAttendanceController::class, 'getQrToken']);
+    Route::get('admin/staff-attendance-report', [StaffAttendanceController::class, 'getReport']);
+    Route::post('teacher/attendance/check-in', [StaffAttendanceController::class, 'checkIn']);
     });
 });
