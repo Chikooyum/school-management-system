@@ -45,13 +45,24 @@ class ReportController extends Controller
 
     // app/Http/Controllers/Api/ReportController.php
 public function getHandoverReport(Request $request)
-    {
+{
 
-        $reportDate = $request->query('date', now()->toDateString());
+    $reportDate = $request->query('date', now()->toDateString());
 
-        // --- LOGIKA BARU UNTUK LAPORAN TERTUNDA ---
-        $pendingPayments = Payment::with('studentBill.student', 'studentBill.costItem', 'user')->whereNull('reconciled_at')->get();
-        $pendingSavings = StudentSaving::with('student', 'user')->where('type', 'Setoran')->whereNull('reconciled_at')->get();
+    Log::info('getHandoverReport called', ['reportDate' => $reportDate]);
+
+    // --- LOGIKA BARU UNTUK LAPORAN TERTUNDA ---
+    // Hitung range UTC untuk tanggal Jakarta
+    $jakartaDate = Carbon::createFromFormat('Y-m-d', $reportDate, 'Asia/Jakarta');
+    $startUtc = $jakartaDate->copy()->startOfDay()->utc();
+    $endUtc = $jakartaDate->copy()->endOfDay()->utc();
+
+    Log::info('Date range', ['startUtc' => $startUtc, 'endUtc' => $endUtc]);
+
+    $pendingPayments = Payment::with('studentBill.student', 'studentBill.costItem', 'user')->whereNull('reconciled_at')->whereBetween('created_at', [$startUtc, $endUtc])->get();
+    $pendingSavings = StudentSaving::with('student', 'user')->where('type', 'Setoran')->whereNull('reconciled_at')->whereBetween('created_at', [$startUtc, $endUtc])->get();
+
+    Log::info('Pending counts', ['payments' => $pendingPayments->count(), 'savings' => $pendingSavings->count()]);
 
         $pendingReport = collect([]);
         foreach ($pendingPayments as $p) {
@@ -65,25 +76,31 @@ public function getHandoverReport(Request $request)
 
         // Kelompokkan berdasarkan tanggal, LALU berdasarkan user
         $groupedPending = $pendingReport->groupBy(function($item) {
-            return Carbon::parse($item['created_at'])->toDateString();
+            return Carbon::parse($item['created_at'])->setTimezone('Asia/Jakarta')->toDateString();
         })->flatMap(function($itemsByDate, $date) {
             return $itemsByDate->groupBy('user_name')->map(function($itemsByUser, $name) use ($date) {
+                // Hitung net uang tunai: Setoran Tabungan - Pembayaran dari Tabungan + Pembayaran Tunai
+                $deposits = $itemsByUser->where('type', 'Tabungan')->sum('amount');
+                $paymentsFromSavings = $itemsByUser->where('type', 'Pembayaran')->where('method', 'Tabungan')->sum('amount');
+                $cashPayments = $itemsByUser->where('type', 'Pembayaran')->where('method', 'Tunai')->sum('amount');
+                $cashTotal = $deposits - $paymentsFromSavings + $cashPayments;
                 return [
                     'user_id' => $itemsByUser->first()['user_id'],
                     'user_name' => $name,
                     'report_date' => $date, // Tambahkan tanggal laporan
-                    'total_amount' => $itemsByUser->filter(function ($item) {
-    return $item['type'] === 'Tabungan' || ($item['type'] === 'Pembayaran' && $item['method'] === 'Tunai');
-})->sum('amount'),
+                    'total_amount' => $cashTotal,
                     'details' => $itemsByUser->sortBy('created_at')->values()->all(),
                 ];
             });
         })->sortBy('report_date')->values();
 
+        Log::info('Grouped pending', ['count' => $groupedPending->count()]);
 
         // --- LOGIKA RIWAYAT (TIDAK BERUBAH BANYAK) ---
         $reconciledPayments = Payment::with('studentBill.student', 'studentBill.costItem', 'user')->whereDate('reconciled_at', $reportDate)->get();
         $reconciledSavings = StudentSaving::with('student', 'user')->where('type', 'Setoran')->whereDate('reconciled_at', $reportDate)->get();
+
+        Log::info('Reconciled counts', ['payments' => $reconciledPayments->count(), 'savings' => $reconciledSavings->count()]);
 
         $reconciledReport = collect([]);
         foreach ($reconciledPayments as $p) {
@@ -96,10 +113,11 @@ public function getHandoverReport(Request $request)
 }
 
         $groupedReconciled = $reconciledReport->groupBy('user_name')->map(function ($items, $name) {
-    // Hitung hanya uang tunai (Setoran Tabungan + Pembayaran Tunai)
-    $cashTotal = $items->filter(function ($item) {
-        return $item['type'] === 'Tabungan' || ($item['type'] === 'Pembayaran' && $item['method'] === 'Tunai');
-    })->sum('amount');
+    // Hitung net uang tunai: Setoran Tabungan - Pembayaran dari Tabungan + Pembayaran Tunai
+    $deposits = $items->where('type', 'Tabungan')->sum('amount');
+    $paymentsFromSavings = $items->where('type', 'Pembayaran')->where('method', 'Tabungan')->sum('amount');
+    $cashPayments = $items->where('type', 'Pembayaran')->where('method', 'Tunai')->sum('amount');
+    $cashTotal = $deposits - $paymentsFromSavings + $cashPayments;
 
     return [
         'user_id' => $items->first()['user_id'],
@@ -122,20 +140,25 @@ public function getHandoverReport(Request $request)
         'report_date' => 'required|date_format:Y-m-d',
     ]);
 
-    DB::transaction(function () use ($validated) {
-        // Hapus baris $reconciledAt = ...
+    $jakartaDate = Carbon::createFromFormat('Y-m-d', $validated['report_date'], 'Asia/Jakarta');
+    $startUtc = $jakartaDate->copy()->startOfDay()->utc();
+    $endUtc = $jakartaDate->copy()->endOfDay()->utc();
 
-        // Gunakan now() langsung, yang akan mencatat tanggal & waktu saat ini
-        Payment::where('handover_user_id', $validated['user_id'])
-            ->whereDate('created_at', $validated['report_date'])
+    Log::info('Reconcile', ['user_id' => $validated['user_id'], 'report_date' => $validated['report_date'], 'startUtc' => $startUtc, 'endUtc' => $endUtc]);
+
+    DB::transaction(function () use ($validated, $startUtc, $endUtc) {
+        $paymentCount = Payment::where('handover_user_id', $validated['user_id'])
+            ->whereBetween('created_at', [$startUtc, $endUtc])
             ->whereNull('reconciled_at')
             ->update(['reconciled_at' => $validated['report_date']]);
 
-        StudentSaving::where('handover_user_id', $validated['user_id'])
+        $savingCount = StudentSaving::where('handover_user_id', $validated['user_id'])
             ->where('type', 'Setoran')
-            ->whereDate('created_at', $validated['report_date'])
+            ->whereBetween('created_at', [$startUtc, $endUtc])
             ->whereNull('reconciled_at')
             ->update(['reconciled_at' => $validated['report_date']]);
+
+        Log::info('Reconcile updated', ['payments' => $paymentCount, 'savings' => $savingCount]);
     });
 
     return response()->json(['message' => 'Laporan berhasil direkonsiliasi.']);
@@ -232,6 +255,10 @@ public function getAllPayments(Request $request)
         $user = auth()->user(); // Ambil user yang sedang login
 
     $range = $request->query('range', '1_month'); // Default 1 bulan
+    $perPage = $request->query('perPage', 20);
+    if ($perPage <= 0 || $perPage > 1000) {
+        $perPage = 10000; // large number for "All"
+    }
 
     $query = Payment::with(['studentBill.student:id,name', 'processor:id,name'])
                     ->orderBy('payment_date', 'desc');
@@ -248,7 +275,7 @@ public function getAllPayments(Request $request)
     }
     // Jika 'all', tidak ada filter waktu
 
-    $payments = $query->paginate(20);
+    $payments = $query->paginate($perPage);
 
     // Ambil semua nomor kwitansi yang muncul lebih dari sekali
     $multiBillReceiptNumbers = Payment::select('receipt_number')

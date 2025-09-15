@@ -12,12 +12,13 @@ class StudentSaving extends Model
 
     protected $fillable = [
         'student_id',
-        'user_id', // <-- Tambahkan ini
+        'processed_by_user_id',
+        'handover_user_id',
         'transaction_date',
         'type',
         'amount',
         'description',
-        'reconciled_at' // Pastikan ini juga ada
+        'reconciled_at'
     ];
 
     /**

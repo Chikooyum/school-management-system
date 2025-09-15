@@ -19,8 +19,10 @@ class StudentSavingController extends Controller
         $user = auth()->user();
         if ($user->role === 'guru') {
             $staff = Staff::where('user_id', $user->id)->first();
-            if (!$staff || !$staff->classGroups()->whereHas('students', fn($q) => $q->where('id', $student->id))->exists()) {
-                abort(403, 'Akses ditolak.');
+
+            // Cek langsung apakah siswa ini ada di dalam kelas yang diajar guru
+            if (!$staff || !$staff->classGroups->contains('id', $student->class_group_id)) {
+                abort(403, 'Anda tidak memiliki hak akses untuk siswa ini.');
             }
         }
     }
@@ -39,26 +41,26 @@ class StudentSavingController extends Controller
     }
 
     public function store(Request $request, Student $student)
-    {
-        $this->authorizeTeacher($student); // Cek otorisasi
+{
+    $this->authorizeTeacher($student);
 
-        $data = $request->validate([
-            'type' => 'required|in:Setoran,Penarikan',
-            'amount' => 'required|numeric|gt:0',
-            'description' => 'nullable|string|max:255',
-        ]);
+    $data = $request->validate([
+        'type' => 'required|in:Setoran,Penarikan',
+        'amount' => 'required|numeric|gt:0',
+        'description' => 'nullable|string|max:255',
+    ]);
 
-        if ($data['type'] === 'Penarikan') {
-            $transactions = $student->savings()->get();
-            $balance = $transactions->where('type', 'Setoran')->sum('amount') - $transactions->where('type', 'Penarikan')->sum('amount');
-            if ($data['amount'] > $balance) {
-                return response()->json(['message' => 'Saldo tidak mencukupi.'], 422);
-            }
+    if ($data['type'] === 'Penarikan') {
+        $transactions = $student->savings()->get();
+        $balance = $transactions->where('type', 'Setoran')->sum('amount') - $transactions->where('type', 'Penarikan')->sum('amount');
+        if ($data['amount'] > $balance) {
+            return response()->json(['message' => 'Saldo tidak mencukupi.'], 422);
         }
+    }
 
-        $actor = auth()->user();
-    $student->load('classGroup.waliKelas.user'); // Muat relasi yang dibutuhkan
-    $waliKelasUser = $student->classGroup?->waliKelas?->user;
+    $actor = auth()->user();
+    $student->load('classGroup.waliKelas.user'); // ← PERBAIKAN DI SINI
+    $waliKelasUser = $student->classGroup?->waliKelas?->user; // ← PERBAIKAN DI SINI
     $handoverUserId = ($actor->role === 'sysadmin' && $waliKelasUser) ? $waliKelasUser->id : $actor->id;
 
     $transaction = $student->savings()->create([
@@ -69,8 +71,9 @@ class StudentSavingController extends Controller
         'processed_by_user_id' => $actor->id,
         'handover_user_id' => $handoverUserId,
     ]);
-        return response()->json($transaction, 201);
-    }
+
+    return response()->json($transaction, 201);
+}
     // app/Http/Controllers/Api/StudentSavingController.php
 
 public function withdrawAndPay(Request $request, Student $student)
@@ -105,7 +108,6 @@ public function withdrawAndPay(Request $request, Student $student)
             'description' => 'Pembayaran tagihan: ' . $bill->costItem->name,
             'processed_by_user_id' => $actor->id,
             'handover_user_id' => $actor->id, // Transaksi internal, tanggung jawabnya sama dengan pemroses
-            'reconciled_at' => now(),
         ]);
 
         // 2. Catat sebagai pembayaran tagihan (dengan kolom yang benar)
@@ -117,7 +119,6 @@ public function withdrawAndPay(Request $request, Student $student)
             'receipt_number' => $data['receipt_number'],
             'processed_by_user_id' => $actor->id,
             'handover_user_id' => $actor->id,
-            'reconciled_at' => now(),
         ]);
 
         // 3. Update status tagihan
@@ -129,5 +130,6 @@ public function withdrawAndPay(Request $request, Student $student)
 
     return response()->json(['message' => 'Tagihan berhasil dibayar menggunakan saldo tabungan.']);
 }
+
 
 }

@@ -71,4 +71,14 @@ class ClassGroupController extends Controller
 
         return response()->json(['message' => 'Daftar siswa di kelas berhasil diperbarui.']);
     }
+    public function staff()
+    {
+        return $this->belongsTo(Staff::class, 'staff_id');
+    }
+
+    // Atau jika sudah ada waliKelas relationship:
+    public function waliKelas()
+    {
+        return $this->belongsTo(Staff::class, 'staff_id');
+    }
 }

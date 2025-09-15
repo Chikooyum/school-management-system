@@ -42,9 +42,12 @@ public function store(Request $request)
             $waliKelasUser = $student->classGroup?->waliKelas?->user;
             $handoverUserId = (($actor->role === 'sysadmin' || $actor->role === 'superadmin') && $waliKelasUser) ? $waliKelasUser->id : $actor->id;
 
+            $paymentDate = now();
+            Log::info('Payment created', ['payment_date' => $paymentDate, 'jakarta_date' => $paymentDate->setTimezone('Asia/Jakarta')]);
+
             $payment = Payment::create([
                 'student_bill_id' => $bill->id,
-                'payment_date' => now(),
+                'payment_date' => $paymentDate,
                 'amount_paid' => $validated['amount_paid'],
                 'receipt_number' => $validated['receipt_number'],
                 'payment_method' => 'Tunai',

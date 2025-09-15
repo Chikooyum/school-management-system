@@ -56,9 +56,10 @@ public function getAttendanceSheetForClass(Request $request, ClassGroup $classGr
     // Untuk GURU & SYSADMIN: Menyimpan data absensi
     public function storeAttendance(Request $request)
     {
+        $todayJakarta = now()->setTimezone('Asia/Jakarta')->format('Y-m-d');
         $data = $request->validate([
             'class_group_id' => 'required|exists:class_groups,id',
-            'attendance_date' => 'required|date_format:Y-m-d|before_or_equal:today',
+            'attendance_date' => 'required|date_format:Y-m-d|before_or_equal:' . $todayJakarta,
             'attendances' => 'required|array',
             'attendances.*.student_id' => 'required|exists:students,id',
             'attendances.*.status' => 'required|in:Hadir,Sakit,Izin,Alpa',

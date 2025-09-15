@@ -69,7 +69,7 @@
 <table class="details">
     <tr>
         <td><strong>No. Kwitansi:</strong> {{ $firstPayment->receipt_number }}</td>
-        <td class="text-right"><strong>Tanggal Bayar:</strong> {{ \Carbon\Carbon::parse($firstPayment->payment_date)->format('d F Y') }}</td>
+        <td class="text-right"><strong>Tanggal Bayar:</strong> {{ \Carbon\Carbon::parse($firstPayment->payment_date)->setTimezone('Asia/Jakarta')->format('d F Y') }}</td>
     </tr>
     <tr>
         <td colspan="2"><strong>Diterima dari:</strong> {{ $firstPayment->studentBill->student->name }}</td>

@@ -20,4 +20,9 @@ class ClassGroup extends Model
     {
         return $this->hasMany(Student::class);
     }
+
+    public function staff()
+    {
+        return $this->belongsTo(Staff::class, 'staff_id');
+    }
 }
